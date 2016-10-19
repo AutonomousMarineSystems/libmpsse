@@ -15,7 +15,7 @@
 #else
 #include <ftdi.h>
 #endif
-
+#include <libusb-1.0/libusb.h>
 #include "mpsse.h"
 #include "support.h"
 #include "config.h"
@@ -97,6 +97,48 @@ struct mpsse_context *Open(int vid, int pid, enum modes mode, int freq, int endi
 }
 
 /* 
+ * Open device by device string
+ *
+ * @mode        - MPSSE mode, one of enum modes.
+ * @freq        - Clock frequency to use for the specified mode.
+ * @endianess   - Specifies how data is clocked in/out (MSB, LSB).
+ * @interface   - FTDI interface to use (IFACE_A - IFACE_D).
+ * @device_description - NULL-terminated description-string, using this format:
+ *               d:<devicenode> path of bus and device-node (e.g. "003/001") within usb device tree (usually at /proc/bus/usb/)
+ *               i:<vendor>:<product> first device with given vendor and product id, ids can be decimal, octal (preceded by "0") or hex (preceded by "0x")
+ *               i:<vendor>:<product>:<index> as above with index being the number of the device (starting with 0) if there are more than one
+ *               s:<vendor>:<product>:<serial> first device with given vendor id, product id and serial string
+ */
+struct mpsse_context *OpenString(enum modes mode, int freq, int endianess, int interface, const char* device_description)
+{    
+    int status = 0;
+    struct mpsse_context *mpsse = NULL;
+
+    mpsse = malloc(sizeof(struct mpsse_context));
+    if(mpsse)
+    {
+        memset(mpsse, 0, sizeof(struct mpsse_context));
+
+        /* Legacy; flushing is no longer needed, so disable it by default. */
+        FlushAfterRead(mpsse, 0);
+
+        /* ftdilib initialization */
+        if(ftdi_init(&mpsse->ftdi) == 0)
+        {
+            /* Set the FTDI interface  */
+            ftdi_set_interface(&mpsse->ftdi, interface);
+
+            /* Open the specified device */
+            if(ftdi_usb_open_string(&mpsse->ftdi, device_description) == 0)
+                PostOpenInit(mpsse, mode, freq, endianess, interface);        
+        }
+    }
+
+    return mpsse;
+}
+
+
+/* 
  * Open device by VID/PID/index
  *
  * @vid         - Device vendor ID.
@@ -134,70 +176,81 @@ struct mpsse_context *OpenIndex(int vid, int pid, enum modes mode, int freq, int
 
 			/* Open the specified device */
 			if(ftdi_usb_open_desc_index(&mpsse->ftdi, vid, pid, description, serial, index) == 0)
-			{
-				mpsse->mode = mode;
-				mpsse->vid = vid;
-				mpsse->pid = pid;
-				mpsse->status = STOPPED;
-				mpsse->endianess = endianess;
-
-				/* Set the appropriate transfer size for the requested protocol */
-				if(mpsse->mode == I2C)
-				{
-					mpsse->xsize = I2C_TRANSFER_SIZE;
-				}
-				else
-				{
-					mpsse->xsize = SPI_RW_SIZE;
-				}
-	
-				status |= ftdi_usb_reset(&mpsse->ftdi);
-				status |= ftdi_set_latency_timer(&mpsse->ftdi, LATENCY_MS);
-				status |= ftdi_write_data_set_chunksize(&mpsse->ftdi, CHUNK_SIZE);
-				status |= ftdi_read_data_set_chunksize(&mpsse->ftdi, CHUNK_SIZE);
-				status |= ftdi_set_bitmode(&mpsse->ftdi, 0, BITMODE_RESET);
-
-				if(status == 0)
-				{
-					/* Set the read and write timeout periods */
-					set_timeouts(mpsse, USB_TIMEOUT);
-					
-					if(mpsse->mode != BITBANG)
-					{
-						ftdi_set_bitmode(&mpsse->ftdi, 0, BITMODE_MPSSE);
-
-						if(SetClock(mpsse, freq) == MPSSE_OK)
-						{
-							if(SetMode(mpsse, endianess) == MPSSE_OK)
-							{
-								mpsse->open = 1;
-
-								/* Give the chip a few mS to initialize */
-								usleep(SETUP_DELAY);
-
-								/* 
-								 * Not all FTDI chips support all the commands that SetMode may have sent.
-								 * This clears out any errors from unsupported commands that might have been sent during set up. 
-								 */
-								ftdi_usb_purge_buffers(&mpsse->ftdi);
-							}
-						}
-					}
-					else
-					{
-						/* Skip the setup functions if we're just operating in BITBANG mode */
-						if(ftdi_set_bitmode(&mpsse->ftdi, 0xFF, BITMODE_BITBANG) == 0)
-						{
-							mpsse->open = 1;
-						}
-					}
-				}
-			}
-		}
+                            PostOpenInit(mpsse, mode, freq, endianess, interface);        
+                }
 	}
 
 	return mpsse;
 }
+
+void PostOpenInit(struct mpsse_context *mpsse, enum modes mode, int freq, int endianess, int interface)
+{
+    int status = 0;
+
+    struct libusb_device_descriptor descriptor;
+    libusb_get_device_descriptor(libusb_get_device(mpsse->ftdi.usb_dev), &descriptor);
+        
+    mpsse->mode = mode;
+    mpsse->vid = descriptor.idVendor;
+    mpsse->pid = descriptor.idProduct;
+    mpsse->status = STOPPED;
+    mpsse->endianess = endianess;
+
+    /* Set the appropriate transfer size for the requested protocol */
+    if(mpsse->mode == I2C)
+    {
+        mpsse->xsize = I2C_TRANSFER_SIZE;
+    }
+    else
+    {
+        mpsse->xsize = SPI_RW_SIZE;
+    }
+	
+    status |= ftdi_usb_reset(&mpsse->ftdi);
+    status |= ftdi_set_latency_timer(&mpsse->ftdi, LATENCY_MS);
+    status |= ftdi_write_data_set_chunksize(&mpsse->ftdi, CHUNK_SIZE);
+    status |= ftdi_read_data_set_chunksize(&mpsse->ftdi, CHUNK_SIZE);
+    status |= ftdi_set_bitmode(&mpsse->ftdi, 0, BITMODE_RESET);
+
+    if(status == 0)
+    {
+        /* Set the read and write timeout periods */
+        set_timeouts(mpsse, USB_TIMEOUT);
+					
+        if(mpsse->mode != BITBANG)
+        {
+            ftdi_set_bitmode(&mpsse->ftdi, 0, BITMODE_MPSSE);
+
+            if(SetClock(mpsse, freq) == MPSSE_OK)
+            {
+                if(SetMode(mpsse, endianess) == MPSSE_OK)
+                {
+                    mpsse->open = 1;
+
+                    /* Give the chip a few mS to initialize */
+                    usleep(SETUP_DELAY);
+
+                    /* 
+                     * Not all FTDI chips support all the commands that SetMode may have sent.
+                     * This clears out any errors from unsupported commands that might have been sent during set up. 
+                     */
+                    ftdi_usb_purge_buffers(&mpsse->ftdi);
+                }
+            }
+        }
+        else
+        {
+            /* Skip the setup functions if we're just operating in BITBANG mode */
+            if(ftdi_set_bitmode(&mpsse->ftdi, 0xFF, BITMODE_BITBANG) == 0)
+            {
+                mpsse->open = 1;
+            }
+        }
+    }
+			
+}
+
+
 
 /* 
  * Closes the device, deinitializes libftdi, and frees the MPSSE context pointer.

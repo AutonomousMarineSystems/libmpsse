@@ -175,6 +175,9 @@ struct mpsse_context
 struct mpsse_context *MPSSE(enum modes mode, int freq, int endianess);
 struct mpsse_context *Open(int vid, int pid, enum modes mode, int freq, int endianess, int interface, const char *description, const char *serial);
 struct mpsse_context *OpenIndex(int vid, int pid, enum modes mode, int freq, int endianess, int interface, const char *description, const char *serial, int index);
+struct mpsse_context *OpenString(enum modes mode, int freq, int endianess, int interface, const char* device_description);
+void PostOpenInit(struct mpsse_context *mpsse, enum modes mode, int freq, int endianess, int interface);
+
 void Close(struct mpsse_context *mpsse);
 const char *ErrorString(struct mpsse_context *mpsse);
 int SetMode(struct mpsse_context *mpsse, int endianess);
