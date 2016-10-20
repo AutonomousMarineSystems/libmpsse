@@ -183,6 +183,97 @@ struct mpsse_context *OpenIndex(int vid, int pid, enum modes mode, int freq, int
 	return mpsse;
 }
 
+/* 
+ * Open device by VID/PID/port list
+ *
+ * @vid         - Device vendor ID.
+ * @pid         - Device product ID.
+ * @mode        - MPSSE mode, one of enum modes.
+ * @freq        - Clock frequency to use for the specified mode.
+ * @endianess   - Specifies how data is clocked in/out (MSB, LSB).
+ * @interface   - FTDI interface to use (IFACE_A - IFACE_D).
+ * @bus         - Bus for device to match
+ * @ports       - Array of USB ports from root for this device
+ * @ports_length - Size of ports
+ *
+ * Returns a pointer to an MPSSE context structure. 
+ * On success, mpsse->open will be set to 1.
+ * On failure, mpsse->open will be set to 0.
+ */
+struct mpsse_context *OpenPorts(int vid, int pid, enum modes mode, int freq, int endianess, int interface, uint8_t bus, uint8_t* ports, int ports_length)
+{
+	int status = 0;
+	struct mpsse_context *mpsse = NULL;
+
+	mpsse = malloc(sizeof(struct mpsse_context));
+	if(mpsse)
+	{
+		memset(mpsse, 0, sizeof(struct mpsse_context));
+
+		/* Legacy; flushing is no longer needed, so disable it by default. */
+		FlushAfterRead(mpsse, 0);
+
+
+                struct ftdi_device_list* dev_list;
+                struct ftdi_device_list* curdev;
+		/* ftdilib initialization */
+		if(ftdi_init(&mpsse->ftdi) == 0)
+		{
+			/* Set the FTDI interface  */
+			ftdi_set_interface(&mpsse->ftdi, interface);
+
+                        if(ftdi_usb_find_all(&mpsse->ftdi, &dev_list, vid, pid) >= 0)
+                        {
+                            
+                            for (curdev = dev_list; curdev != NULL; curdev = curdev->next)
+                            {
+
+                                int max_ports = 7;
+                                uint8_t curports[max_ports];
+                                
+                                uint8_t curbus = libusb_get_bus_number (curdev->dev);
+                                int num_curports = libusb_get_port_numbers(curdev->dev, curports, max_ports);
+
+                                /* Wrong bus */
+                                if(curbus != bus)
+                                    continue;
+                                
+                                /* Can't match if the port depth is different */
+                                if(num_curports != ports_length)
+                                    continue;
+
+                                /* Check for same ports as request */
+                                int match = 1;
+                                for(j = 0; j < ports_length; ++j)
+                                {
+                                    if(ports[j] != curports[j])
+                                    {
+                                        match = 0;
+                                        break;
+                                    }
+                                }
+
+                                /* Different ports */
+                                if(!match)
+                                    continue;
+                                   
+                                /* Success, open the specified device */
+                                if(ftdi_usb_open_dev(&mpsse->ftdi, curdev->dev) == 0)
+                                {
+                                    PostOpenInit(mpsse, mode, freq, endianess, interface);
+                                    break;
+                                }
+                            }
+                            
+                            ftdi_list_free(&dev_list);
+                        }
+                }
+	}
+
+	return mpsse;
+}
+
+
 void PostOpenInit(struct mpsse_context *mpsse, enum modes mode, int freq, int endianess, int interface)
 {
     int status = 0;

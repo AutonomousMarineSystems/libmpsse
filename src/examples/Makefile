@@ -1,4 +1,4 @@
-LDFLAGS=-lmpsse
+LDFLAGS=-lmpsse -DLIBFTDI1=1 -I .. -L .. 
 
 all: spiflash spiflashfast i2ceeprom ds1305 gpio bitbang
 
@@ -15,7 +15,7 @@ ds1305:
 	$(CC) $(CFLAGS) ds1305.c -o ds1305 $(LDFLAGS)
 
 gpio:
-	$(CC) $(CFLAGS) gpio.c -o gpio $(LDFLAGS)
+	$(CC) $(CFLAGS) gpio.c -o gpio $(LDFLAGS) 
 
 bitbang:
 	$(CC) $(CFLAGS) bitbang.c -o bitbang $(LDFLAGS)
