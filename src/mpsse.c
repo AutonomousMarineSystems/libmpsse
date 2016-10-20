@@ -244,6 +244,7 @@ struct mpsse_context *OpenPorts(int vid, int pid, enum modes mode, int freq, int
 
                                 /* Check for same ports as request */
                                 int match = 1;
+                                int j = 0;
                                 for(j = 0; j < ports_length; ++j)
                                 {
                                     if(ports[j] != curports[j])
